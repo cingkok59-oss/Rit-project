@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Rit Motion Editor</title>
+<style>
+body {
+  margin: 0;
+  font-family: Arial;
+  background: #111;
+  color: #fff;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+#top {
+  flex: 1;
+  display: flex;
+}
+
+#preview {
+  flex: 2;
+  background: black;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+canvas {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+#controls {
+  flex: 1;
+  padding: 10px;
+}
+
+#timeline {
+  height: 150px;
+  background: #222;
+  position: relative;
+  overflow-x: scroll;
+}
+
+.track {
+  height: 50px;
+  border-bottom: 1px solid #444;
+  position: relative;
+}
+
+.clip {
+  position: absolute;
+  height: 40px;
+  background: #4caf50;
+  top: 5px;
+  cursor: grab;
+}
+
+.playhead {
+  position: absolute;
+  width: 2px;
+  background: red;
+  top: 0;
+  bottom: 0;
+}
+
+.trim {
+  width: 5px;
+  background: yellow;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  cursor: ew-resize;
+}
+</style>
+</head>
+
+<body>
+
+<div id="app">
+
+  <div id="top">
+    <div id="preview">
+      <canvas id="canvas" width="640" height="360"></canvas>
+    </div>
+
+    <div id="controls">
+      <input type="file" id="upload" accept="video/*"><br><br>
+
+      <button onclick="playVideo()">Play</button>
+      <button onclick="pauseVideo()">Pause</button>
+
+      <br><br>
+
+      Brightness:
+      <input type="range" id="brightness" min="0" max="200" value="100">
+
+      <br>
+
+      Contrast:
+      <input type="range" id="contrast" min="0" max="200" value="100">
+    </div>
+  </div>
+
+  <div id="timeline">
+    <div class="track" id="videoTrack"></div>
+    <div class="track" id="textTrack"></div>
+    <div class="playhead" id="playhead"></div>
+  </div>
+
+</div>
+
+<video id="video" style="display:none;"></video>
+
+<script>
+const video = document.getElementById("video");
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+const playhead = document.getElementById("playhead");
+const timeline = document.getElementById("timeline");
+
+let clips = [];
+let isPlaying = false;
+let zoom = 1;
+
+document.getElementById("upload").onchange = function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  video.src = URL.createObjectURL(file);
+
+  addClip();
+};
+
+function addClip() {
+  const clip = document.createElement("div");
+  clip.className = "clip";
+  clip.style.left = "0px";
+  clip.style.width = "200px";
+
+  // Trim handles
+  const leftTrim = document.createElement("div");
+  leftTrim.className = "trim";
+  leftTrim.style.left = "0px";
+
+  const rightTrim = document.createElement("div");
+  rightTrim.className = "trim";
+  rightTrim.style.right = "0px";
+
+  clip.appendChild(leftTrim);
+  clip.appendChild(rightTrim);
+
+  makeDraggable(clip);
+
+  document.getElementById("videoTrack").appendChild(clip);
+  clips.push(clip);
+
+  makeTrim(leftTrim, clip, true);
+  makeTrim(rightTrim, clip, false);
+}
+
+function makeDraggable(el) {
+  let offsetX = 0;
+
+  el.onmousedown = (e) => {
+    offsetX = e.offsetX;
+
+    document.onmousemove = (ev) => {
+      let x = ev.pageX - timeline.offsetLeft - offsetX;
+      el.style.left = x + "px";
+    };
+
+    document.onmouseup = () => {
+      document.onmousemove = null;
+    };
+  };
+}
+
+function makeTrim(handle, clip, isLeft) {
+  handle.onmousedown = (e) => {
+    e.stopPropagation();
+
+    document.onmousemove = (ev) => {
+      let rect = clip.getBoundingClientRect();
+      let newWidth;
+
+      if (isLeft) {
+        let delta = ev.movementX;
+        let left = parseInt(clip.style.left || 0);
+        clip.style.left = (left + delta) + "px";
+        newWidth = rect.width - delta;
+      } else {
+        newWidth = rect.width + ev.movementX;
+      }
+
+      clip.style.width = newWidth + "px";
+    };
+
+    document.onmouseup = () => {
+      document.onmousemove = null;
+    };
+  };
+}
+
+function drawFrame() {
+  if (video.readyState >= 2) {
+    let brightness = document.getElementById("brightness").value / 100;
+    let contrast = document.getElementById("contrast").value / 100;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    let data = frame.data;
+
+    for (let i = 0; i < data.length; i += 4) {
+      data[i] = data[i] * contrast + brightness * 50;
+      data[i+1] = data[i+1] * contrast + brightness * 50;
+      data[i+2] = data[i+2] * contrast + brightness * 50;
+    }
+
+    ctx.putImageData(frame, 0, 0);
+  }
+
+  updatePlayhead();
+
+  requestAnimationFrame(drawFrame);
+}
+
+function updatePlayhead() {
+  if (video.duration) {
+    let percent = video.currentTime / video.duration;
+    let width = timeline.scrollWidth;
+    playhead.style.left = (percent * width) + "px";
+  }
+}
+
+function playVideo() {
+  video.play();
+  isPlaying = true;
+}
+
+function pauseVideo() {
+  video.pause();
+  isPlaying = false;
+}
+
+// Sync playhead click
+timeline.onclick = function(e) {
+  let rect = timeline.getBoundingClientRect();
+  let x = e.clientX - rect.left;
+  let percent = x / timeline.scrollWidth;
+
+  video.currentTime = percent * video.duration;
+};
+
+video.ontimeupdate = function() {
+  updatePlayhead();
+};
+
+// Zoom timeline
+timeline.onwheel = function(e) {
+  e.preventDefault();
+  zoom += e.deltaY * -0.001;
+  zoom = Math.max(0.5, Math.min(3, zoom));
+
+  timeline.style.transform = `scaleX(${zoom})`;
+};
+
+drawFrame();
+</script>
+
+</body>
+</html>
